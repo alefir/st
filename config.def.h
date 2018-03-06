@@ -5,8 +5,8 @@
  *
  * font: see http://freedesktop.org/software/fontconfig/fontconfig-user.html
  */
-static char font[] = "mono:pixelsize=14:antialias=true:autohint=true";
-static int borderpx = 2;
+static char font[] = "Iosevka Term Slab:pixelsize=13:antialias=false:autohint=true";
+static int borderpx = 0;
 
 /*
  * What program is execed by st depends of these precedence rules:
@@ -38,6 +38,9 @@ static char worddelimiters[] = " ";
 static unsigned int doubleclicktimeout = 300;
 static unsigned int tripleclicktimeout = 600;
 
+static char *cwd = NULL;
+static char *plumber_cmd = "xdg-open";
+
 /* alt screens */
 static int allowaltscreen = 1;
 
@@ -54,13 +57,13 @@ static unsigned int blinktimeout = 800;
 /*
  * thickness of underline and bar cursors
  */
-static unsigned int cursorthickness = 2;
+static unsigned int cursorthickness = 1;
 
 /*
  * bell volume. It must be a value between -100 and 100. Use 0 for disabling
  * it
  */
-static int bellvolume = 0;
+static int bellvolume = 99;
 
 /* default TERM value */
 static char termname[] = "st-256color";
@@ -82,8 +85,32 @@ static char termname[] = "st-256color";
  */
 static unsigned int tabspaces = 8;
 
+/* bg opacity */
+static int alpha = 0xe0;
+
 /* Terminal colors (16 first used in escape sequence) */
 static const char *colorname[] = {
+	/* termite import */
+	"#000000",  /*  0: black    */
+	"#df1635",  /*  1: red      */
+	"#35df16",  /*  2: green    */
+	"#dfc116",  /*  3: yellow   */
+	"#1635df",  /*  4: blue     */
+	"#c116df",  /*  5: magenta  */
+	"#16dfc1",  /*  6: cyan     */
+	"#d9d9d9",  /*  7: white    */
+	"#1d1d1d",  /*  8: brblack  */
+	"#eb3450",  /*  9: brred    */
+	"#50eb34",  /* 10: brgreen  */
+	"#ebcf34",  /* 11: bryellow */
+	"#3450eb",  /* 12: brblue   */
+	"#cf34eb",  /* 13: brmagenta*/
+	"#34ebcf",  /* 14: brcyan   */
+	"#ffffff",  /* 15: brwhite  */
+};
+
+/* Terminal colors for Solarized Dark */
+static const char *altcolorname[] = {
 	/* solarized dark */
 	"#073642",  /*  0: black    */
 	"#dc322f",  /*  1: red      */
@@ -101,37 +128,17 @@ static const char *colorname[] = {
 	"#6c71c4",  /* 13: brmagenta*/
 	"#93a1a1",  /* 14: brcyan   */
 	"#fdf6e3",  /* 15: brwhite  */
-};
-
-/* Terminal colors for alternate (light) palette */
-static const char *altcolorname[] = {
-	/* solarized light */
-	"#eee8d5",  /*  0: black    */
-	"#dc322f",  /*  1: red      */
-	"#859900",  /*  2: green    */
-	"#b58900",  /*  3: yellow   */
-	"#268bd2",  /*  4: blue     */
-	"#d33682",  /*  5: magenta  */
-	"#2aa198",  /*  6: cyan     */
-	"#073642",  /*  7: white    */
-	"#fdf6e3",  /*  8: brblack  */
-	"#cb4b16",  /*  9: brred    */
-	"#93a1a1",  /* 10: brgreen  */
-	"#839496",  /* 11: bryellow */
-	"#657b83",  /* 12: brblue   */
-	"#6c71c4",  /* 13: brmagenta*/
-	"#586e75",  /* 14: brcyan   */
-	"#002b36",  /* 15: brwhite  */
+	"black",
 };
 
 /*
  * Default colors (colorname index)
  * foreground, background, cursor, reverse cursor
  */
-static unsigned int defaultfg = 12;
-static unsigned int defaultbg = 8;
-static unsigned int defaultcs = 14;
-static unsigned int defaultrcs = 15;
+static unsigned int defaultfg = 7;
+static unsigned int defaultbg = 0;
+static unsigned int defaultcs = 7;
+static unsigned int defaultrcs = 7;
 
 /*
  * Default shape of cursor
@@ -140,7 +147,7 @@ static unsigned int defaultrcs = 15;
  * 6: Bar ("|")
  * 7: Snowman ("☃")
  */
-static unsigned int cursorshape = 2;
+static unsigned int cursorshape = 4;
 
 /*
  * Default columns and rows numbers
@@ -179,7 +186,7 @@ static MouseKey mkeys[] = {
 };
 
 /* Internal keyboard shortcuts. */
-#define MODKEY Mod1Mask
+#define MODKEY ControlMask
 
 static Shortcut shortcuts[] = {
 	/* mask                 keysym          function        argument */
@@ -202,7 +209,6 @@ static Shortcut shortcuts[] = {
 	{ MODKEY,            	XK_k,  		kscrollup,      {.i = 1} },
 	{ MODKEY,            	XK_j,   	kscrolldown,    {.i = 1} },
 	{ MODKEY,		XK_u,		kscrollup,      {.i = -1} },
-	{ MODKEY,		XK_d,		kscrolldown,    {.i = -1} },
 };
 
 /*

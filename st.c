@@ -61,6 +61,7 @@ char *argv0;
 #define XK_ANY_MOD    UINT_MAX
 #define XK_NO_MOD     0
 #define XK_SWITCH_MOD (1<<13)
+#define OPAQUE 0Xff
 #define histsize 2000
 
 /* macros */
@@ -82,6 +83,8 @@ char *argv0;
 #define TIMEDIFF(t1, t2)	((t1.tv_sec-t2.tv_sec)*1000 + \
 				(t1.tv_nsec-t2.tv_nsec)/1E6)
 #define MODBIT(x, set, bit)	((set) ? ((x) |= (bit)) : ((x) &= ~(bit)))
+
+#define USE_ARGB (alpha != OPAQUE && opt_embed == NULL)
 
 #define TRUECOLOR(r,g,b)	(1 << 24 | (r) << 16 | (g) << 8 | (b))
 #define IS_TRUECOL(x)		(1 << 24 & (x))
@@ -273,6 +276,11 @@ typedef struct {
 	Draw draw;
 	Visual *vis;
 	XSetWindowAttributes attrs;
+	/* Here, we use the term *pointer* to differentiate the cursor
+	 * one sees when hovering the mouse over the terminal from, e.g.,
+	 * a green rectangle where text would be entered. */
+	Cursor vpointer, bpointer; /* visible and hidden pointers */
+	int pointerisvisible;
 	int scr;
 	int isfixed; /* is fixed geometry? */
 	int l, t; /* left and top offset */
@@ -281,6 +289,7 @@ typedef struct {
 	int w, h; /* window width and height */
 	int ch; /* char height */
 	int cw; /* char width  */
+	int depth; /*  bit depth */
 	int cyo; /* char y offset */
 	char state; /* focus, redraw, visible */
 	int cursor; /* cursor style */
@@ -571,6 +580,9 @@ static uchar utfbyte[UTF_SIZ + 1] = {0x80,    0, 0xC0, 0xE0, 0xF0};
 static uchar utfmask[UTF_SIZ + 1] = {0xC0, 0x80, 0xE0, 0xF0, 0xF8};
 static Rune utfmin[UTF_SIZ + 1] = {       0,    0,  0x80,  0x800,  0x10000};
 static Rune utfmax[UTF_SIZ + 1] = {0x10FFFF, 0x7F, 0x7FF, 0xFFFF, 0x10FFFF};
+
+extern char *cwd;
+extern char *plumber_cmd;
 
 /* Font Ring Cache */
 enum {
@@ -1309,6 +1321,9 @@ xsetsel(char *str, Time t)
 void
 brelease(XEvent *e)
 {
+	pid_t child;
+	char cmd[100 + strlen(cwd)];
+
 	if (IS_SET(MODE_MOUSE) && !(e->xbutton.state & forceselmod)) {
 		mousereport(e);
 		return;
@@ -1316,6 +1331,17 @@ brelease(XEvent *e)
 
 	if (e->xbutton.button == Button2) {
 		selpaste(NULL);
+		/*
+	} else if (e->xbutton.button == Button3) {
+		switch(child = fork()) {
+			case -1:
+				return;
+			case 0:
+				sprintf(cmd, "(cd %s ; %s %s)", cwd, plumber_cmd, sel.primary);
+				execvp( "sh", (char *const []){ "/bin/sh", "-c", cmd, 0 });
+				exit(127);
+		}
+		*/
 	} else if (e->xbutton.button == Button1) {
 		if (sel.mode == SEL_READY) {
 			getbuttoninfo(e);
@@ -1331,6 +1357,13 @@ void
 bmotion(XEvent *e)
 {
 	int oldey, oldex, oldsby, oldsey;
+
+	if (!xw.pointerisvisible) {
+		XDefineCursor(xw.dpy, xw.win, xw.vpointer);
+		xw.pointerisvisible = 1;
+		if (!IS_SET(MODE_MOUSEMANY))
+			xsetpointermotion(0);
+	}
 
 	if (IS_SET(MODE_MOUSE) && !(e->xbutton.state & forceselmod)) {
 		mousereport(e);
@@ -1542,6 +1575,9 @@ ttyread(void)
 	/* keep any uncomplete utf8 char for the next call */
 	if (buflen > 0)
 		memmove(buf, ptr, buflen);
+
+	if (term.scr > 0 && term.scr < histsize-1)
+		term.scr++;
 
 	if (term.scr > 0 && term.scr < histsize-1)
 		term.scr++;
@@ -2610,6 +2646,9 @@ strhandle(void)
 	switch (strescseq.type) {
 	case ']': /* OSC -- Operating System Command */
 		switch (par) {
+		case 7:
+			if (narg > 1 && access(strescseq.args[1], X_OK) != -1)
+				cwd = strescseq.args[1];
 		case 0:
 		case 1:
 		case 2:
@@ -3276,6 +3315,14 @@ tresize(int col, int row)
 		}
 	}
 
+	for (i = 0; i < histsize; i++) {
+		term.hist[i] = xrealloc(term.hist[i], col * sizeof(Glyph));
+		for (j = mincol; j < col; j++) {
+			term.hist[i][j] = term.c.attr;
+			term.hist[i][j].u = ' ';
+		}
+	}
+
 	/* resize each row to new width, zero-pad if needed */
 	for (i = 0; i < minrow; i++) {
 		term.line[i] = xrealloc(term.line[i], col * sizeof(Glyph));
@@ -3326,7 +3373,7 @@ xresize(int col, int row)
 
 	XFreePixmap(xw.dpy, xw.buf);
 	xw.buf = XCreatePixmap(xw.dpy, xw.win, xw.w, xw.h,
-			DefaultDepth(xw.dpy, xw.scr));
+			xw.depth);
 	XftDrawChange(xw.draw, xw.buf);
 	xclear(0, 0, xw.w, xw.h);
 }
@@ -3385,6 +3432,14 @@ xloadcols(void)
 			else
 				die("Could not allocate color %d\n", i);
 		}
+
+	/* set alpha value of bg color */
+	if (USE_ARGB) {
+		dc.col[defaultbg].color.alpha = (0xffff * alpha) / OPAQUE; //0xcccc;
+		dc.col[defaultbg].pixel &= 0x00111111;
+		dc.col[defaultbg].pixel |= alpha << 24; // 0xcc000000;
+	}
+
 	loaded = 1;
 }
 
@@ -3404,6 +3459,15 @@ xsetcolorname(int x, const char *name)
 	dc.col[x] = ncolor;
 
 	return 0;
+}
+void
+xtermclear(int col1, int row1, int col2, int row2) {
+	XftDrawRect(xw.draw,
+			&dc.col[IS_SET(MODE_REVERSE) ? defaultfg : defaultbg],
+			borderpx + col1 * xw.cw,
+			borderpx + row1 * xw.ch,
+			(col2-col1+1) * xw.cw,
+			(row2-row1+1) * xw.ch);
 }
 
 /*
@@ -3669,15 +3733,46 @@ void
 xinit(void)
 {
 	XGCValues gcvalues;
-	Cursor cursor;
 	Window parent;
 	pid_t thispid = getpid();
 	XColor xmousefg, xmousebg;
+	Pixmap blankpm;
 
 	if (!(xw.dpy = XOpenDisplay(NULL)))
 		die("Can't open display\n");
 	xw.scr = XDefaultScreen(xw.dpy);
-	xw.vis = XDefaultVisual(xw.dpy, xw.scr);
+	xw.depth = (USE_ARGB) ? 32: XDefaultDepth(xw.dpy, xw.scr);
+	if (! USE_ARGB)
+		xw.vis = XDefaultVisual(xw.dpy, xw.scr);
+	else {
+		XVisualInfo *vis;
+		XRenderPictFormat *fmt;
+		int nvi;
+		int i;
+
+		XVisualInfo tpl = {
+			.screen = xw.scr,
+			.depth = 32,
+			.class = TrueColor
+		};
+
+		vis = XGetVisualInfo(xw.dpy, VisualScreenMask | VisualDepthMask | VisualClassMask, &tpl, &nvi);
+		xw.vis = NULL;
+		for(i = 0; i < nvi; i ++) {
+			fmt = XRenderFindVisualFormat(xw.dpy, vis[i].visual);
+			if (fmt->type == PictTypeDirect && fmt->direct.alphaMask) {
+				xw.vis = vis[i].visual;
+				break;
+			}
+		}
+
+		XFree(vis);
+
+		if (! xw.vis) {
+			fprintf(stderr, "Couldn't find ARGB visual.\n");
+			exit(1);
+		}
+	}
 
 	/* font */
 	if (!FcInit())
@@ -3687,7 +3782,10 @@ xinit(void)
 	xloadfonts(usedfont, 0);
 
 	/* colors */
-	xw.cmap = XDefaultColormap(xw.dpy, xw.scr);
+	if (! USE_ARGB)
+		xw.cmap = XDefaultColormap(xw.dpy, xw.scr);
+	else
+		xw.cmap = XCreateColormap(xw.dpy, XRootWindow(xw.dpy, xw.scr), xw.vis, None);
 	xloadcols();
 
 	/* adjust fixed window geometry */
@@ -3710,16 +3808,17 @@ xinit(void)
 	if (!(opt_embed && (parent = strtol(opt_embed, NULL, 0))))
 		parent = XRootWindow(xw.dpy, xw.scr);
 	xw.win = XCreateWindow(xw.dpy, parent, xw.l, xw.t,
-			xw.w, xw.h, 0, XDefaultDepth(xw.dpy, xw.scr), InputOutput,
+			xw.w, xw.h, 0, xw.depth, InputOutput,
 			xw.vis, CWBackPixel | CWBorderPixel | CWBitGravity
 			| CWEventMask | CWColormap, &xw.attrs);
 
 	memset(&gcvalues, 0, sizeof(gcvalues));
 	gcvalues.graphics_exposures = False;
-	dc.gc = XCreateGC(xw.dpy, parent, GCGraphicsExposures,
+	xw.buf = XCreatePixmap(xw.dpy, xw.win, xw.w, xw.h, xw.depth);
+	dc.gc = XCreateGC(xw.dpy,
+			(USE_ARGB)? xw.buf: parent,
+			GCGraphicsExposures,
 			&gcvalues);
-	xw.buf = XCreatePixmap(xw.dpy, xw.win, xw.w, xw.h,
-			DefaultDepth(xw.dpy, xw.scr));
 	XSetForeground(xw.dpy, dc.gc, dc.col[defaultbg].pixel);
 	XFillRectangle(xw.dpy, xw.buf, dc.gc, 0, 0, xw.w, xw.h);
 
@@ -3745,8 +3844,9 @@ xinit(void)
 		die("XCreateIC failed. Could not obtain input method.\n");
 
 	/* white cursor, black outline */
-	cursor = XCreateFontCursor(xw.dpy, mouseshape);
-	XDefineCursor(xw.dpy, xw.win, cursor);
+	xw.pointerisvisible = 1;
+	xw.vpointer = XCreateFontCursor(xw.dpy, mouseshape);
+	XDefineCursor(xw.dpy, xw.win, xw.vpointer);
 
 	if (XParseColor(xw.dpy, xw.cmap, getcolorname(mousefg), &xmousefg) == 0) {
 		xmousefg.red   = 0xffff;
@@ -3760,7 +3860,10 @@ xinit(void)
 		xmousebg.blue  = 0x0000;
 	}
 
-	XRecolorCursor(xw.dpy, cursor, &xmousefg, &xmousebg);
+	XRecolorCursor(xw.dpy, xw.vpointer, &xmousefg, &xmousebg);
+	blankpm = XCreateBitmapFromData(xw.dpy, xw.win, &(char){0}, 1, 1);
+	xw.bpointer = XCreatePixmapCursor(xw.dpy, blankpm, blankpm,
+					  &xmousefg, &xmousebg, 0, 0);
 
 	xw.xembed = XInternAtom(xw.dpy, "_XEMBED", False);
 	xw.wmdeletewin = XInternAtom(xw.dpy, "WM_DELETE_WINDOW", False);
@@ -4261,6 +4364,8 @@ unmap(XEvent *ev)
 void
 xsetpointermotion(int set)
 {
+	if (!set && !xw.pointerisvisible)
+		return;
 	MODBIT(xw.attrs.event_mask, set, PointerMotionMask);
 	XChangeWindowAttributes(xw.dpy, xw.win, CWEventMask, &xw.attrs);
 }
@@ -4367,6 +4472,12 @@ kpress(XEvent *ev)
 	Rune c;
 	Status status;
 	Shortcut *bp;
+
+	if (xw.pointerisvisible) {
+		XDefineCursor(xw.dpy, xw.win, xw.bpointer);
+		xsetpointermotion(1);
+		xw.pointerisvisible = 0;
+	}
 
 	if (IS_SET(MODE_KBDLOCK))
 		return;
@@ -4566,11 +4677,11 @@ void
 usage(void)
 {
 	die("usage: %s [-aiv] [-c class] [-f font] [-g geometry]"
-	    " [-n name] [-o file]\n"
+	    " [-n name] [-o file] [-b alpha]\n"
 	    "          [-T title] [-t title] [-w windowid]"
 	    " [[-e] command [args ...]]\n"
 	    "       %s [-aiv] [-c class] [-f font] [-g geometry]"
-	    " [-n name] [-o file]\n"
+	    " [-n name] [-o file] [-b alpha]\n"
 	    "          [-T title] [-t title] [-w windowid] -l line"
 	    " [stty_args ...]\n", argv0, argv0);
 }
@@ -4611,6 +4722,9 @@ main(int argc, char *argv[])
 		break;
 	case 'n':
 		opt_name = EARGF(usage());
+		break;
+	case 'b':
+		alpha = 0x89;
 		break;
 	case 't':
 	case 'T':
