@@ -1,6 +1,6 @@
-# Luke's build of st - the simple (suckless) terminal
+# Alefir's build of st - the simple (suckless) terminal
 
-Forked from [https://github.com/shiva/st](https://github.com/shiva/st) for simplicity's sake, which is the [suckless terminal (st)](https://st.suckless.org/) with some patches added:
+Forked from[https://github.com/Lukesmithxyz/st](http://github.com/Lukesmithxyz/st) which was forked from [https://github.com/shiva/st](https://github.com/shiva/st) for simplicity's sake, which is the [suckless terminal (st)](https://st.suckless.org/) with some patches added:
 
 + copy to clipboard
 + solarized colors (light and dark toggleable)
@@ -10,11 +10,18 @@ Forked from [https://github.com/shiva/st](https://github.com/shiva/st) for simpl
 
 ## My own additions
 
-+ Default font is system "mono" at 14pt
++ Set default font to Iosevka Term Slab at 13pt
++ Set default opacity
++ Add `-b` option to decrease opacity
++ Set default colours to my personal scheme
++ Change default modifier from Alt to Ctrl
++ Set cursor to go invisible when typing
+
+## Lukesmithxyz's own additions
+
 + Fixed transparency patch (see below for installation)
-+ Toggle light/dark mode now Alt-Tab instead of the frequently conflicting F6
-+ Alt-k and Alt-j scroll back/foward in history one line at a time
-+ Alt-u and Alt-d scroll back/foward in history a page at a time
++ Ctrl-k and Ctrl-j scroll back/foward in history one line at a time
++ Ctrl-u and Ctrl-d scroll back/foward in history a page at a time
 
 ## Terminal-specific mappings
 
