@@ -39,7 +39,6 @@ static unsigned int doubleclicktimeout = 300;
 static unsigned int tripleclicktimeout = 600;
 
 static char *cwd = NULL;
-static char *plumber_cmd = "xdg-open";
 
 /* alt screens */
 static int allowaltscreen = 1;
@@ -86,7 +85,7 @@ static char termname[] = "st-256color";
 static unsigned int tabspaces = 8;
 
 /* bg opacity */
-static int alpha = 0xe0;
+static int alpha = 0xFF;
 
 /* Terminal colors (16 first used in escape sequence) */
 static const char *colorname[] = {
