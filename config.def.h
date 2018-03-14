@@ -39,7 +39,6 @@ static unsigned int doubleclicktimeout = 300;
 static unsigned int tripleclicktimeout = 600;
 
 static char *cwd = NULL;
-static char *plumber_cmd = "xdg-open";
 
 /* alt screens */
 static int allowaltscreen = 1;
