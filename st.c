@@ -1321,8 +1321,6 @@ xsetsel(char *str, Time t)
 void
 brelease(XEvent *e)
 {
-	pid_t child;
-	char cmd[100 + strlen(cwd)];
 
 	if (IS_SET(MODE_MOUSE) && !(e->xbutton.state & forceselmod)) {
 		mousereport(e);
